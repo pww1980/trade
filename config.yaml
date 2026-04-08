@@ -1,0 +1,59 @@
+# ============================================================
+# End-of-Day Trading System – Konfiguration
+# ============================================================
+
+# Verzeichnisse
+data_dir: ./data
+output_dir: ./daily_reports
+db_name: trading.db
+log_dir: ./logs
+
+# Beobachtungs-Tickers (US-Aktien, anpassbar)
+tickers:
+  - AAPL
+  - MSFT
+  - NVDA
+  - GOOGL
+  - AMZN
+
+# Yahoo Finance
+yfinance:
+  interval: "5m"    # Intraday-Intervall
+  period: "5d"      # Rückblick für Indikatorberechnung
+
+# Finnhub (kostenloser Free-Tier Key)
+finnhub:
+  api_key: "YOUR_FINNHUB_FREE_KEY"   # leer lassen = kein Sentiment
+
+# Wirtschaftskalender
+investing_calendar:
+  url: "https://www.investing.com/economic-calendar/"
+  min_impact: "MEDIUM"               # Mindestrelevanz: LOW | MEDIUM | HIGH
+
+# KI-Provider: "claude" oder "chatgpt"
+ai_provider: "claude"
+
+claude:
+  api_key: "ANTHROPIC_API_KEY"
+  model: "claude-sonnet-4-6"
+  max_tokens: 4096
+
+openai:
+  api_key: "OPENAI_API_KEY"
+  model: "gpt-4o"
+  max_tokens: 4096
+
+# Signalparameter (regelbasiert, anpassbar)
+signal:
+  sma_fast: 20
+  sma_slow: 50
+  rsi_threshold: 50        # RSI muss unter diesem Wert liegen (BUY)
+  macd_signal: true        # MACD-Histogram muss positiv sein
+  obv_rising: true         # OBV muss gegenüber letztem Wert steigen
+  volume_multiplier: 1.5   # Volumen > 1.5x 20-Tage-Durchschnitt
+
+# Handelszeitfenster (MEZ / CET)
+market_hours:
+  open: "15:30"    # US-Marktöffnung in MEZ
+  close: "22:00"   # US-Marktschluss in MEZ
+  intraday_interval_sec: 300   # 5 Minuten
