@@ -28,6 +28,10 @@ def fetch_ohlcv(ticker: str, interval: str = "5m", period: str = "5d") -> Option
             logger.warning("yfinance: Keine Daten für %s", ticker)
             return None
         df.index = pd.to_datetime(df.index)
+        # Neuere yfinance-Versionen liefern MultiIndex-Spalten wie ("Close", "AAPL").
+        # Auf einfache Spaltennamen reduzieren.
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [col[0] for col in df.columns]
         logger.debug("yfinance: %d Zeilen für %s geladen", len(df), ticker)
         return df
     except Exception as exc:
