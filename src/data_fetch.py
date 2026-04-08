@@ -239,10 +239,14 @@ def run_intraday_loop(
     tickers: list[str],
     cfg: dict,
     stop_at: str = None,
+    simulator=None,
 ) -> None:
     """
     Läuft in einer Schleife (alle interval_sec Sekunden) bis zur Marktschlusszeit.
     Holt OHLCV → berechnet Indikatoren → prüft Signale → lädt News.
+
+    simulator: optionale PaperTradingSimulator-Instanz. Wenn übergeben, wird
+               nach jeder Ticker-Aktualisierung on_tick() aufgerufen.
     """
     from src.db import upsert_prices, upsert_indicators, insert_signal, insert_news
     from src.signal_logic import check_all_signals
@@ -252,12 +256,16 @@ def run_intraday_loop(
     finnhub_key = cfg.get("finnhub", {}).get("api_key", "")
 
     logger.info("Starte Intraday-Loop. Marktschluss: %s. Interval: %ds", market_close, interval_sec)
+    if simulator and simulator.enabled:
+        logger.info("Paper-Trading-Simulator aktiv (Modi: %s)", ", ".join(simulator.portfolios))
 
     while True:
         now_str = datetime.now().strftime("%H:%M")
         if now_str >= market_close:
             logger.info("Marktschluss erreicht (%s) – Intraday-Loop beendet", now_str)
             break
+
+        tick_timestamp = datetime.now().isoformat(timespec="seconds")
 
         for ticker in tickers:
             try:
@@ -278,6 +286,22 @@ def run_intraday_loop(
                 news = fetch_news_sentiment(ticker, finnhub_key)
                 if news:
                     insert_news(conn, news)
+
+                # --- Paper-Trading: aktuellen Preis + neue Signale weiterleiten ---
+                if simulator and simulator.enabled and not df.empty:
+                    # Spaltennamen normalisieren
+                    close_col = [c for c in df.columns if str(c).lower() in ("close", "close")]
+                    if close_col:
+                        current_price = float(df[close_col[0]].iloc[-1])
+                    else:
+                        current_price = float(df.iloc[-1, 3])  # 4. Spalte = Close
+
+                    simulator.on_tick(
+                        ticker=ticker,
+                        current_price=current_price,
+                        signals=signals,
+                        timestamp=tick_timestamp,
+                    )
 
             except Exception as exc:
                 logger.error("Fehler bei Ticker %s: %s", ticker, exc)

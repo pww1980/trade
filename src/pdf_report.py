@@ -3,6 +3,7 @@ pdf_report.py – Tages-PDF-Report via ReportLab.
 
 Seite 1: KPI-Boxen | Wirtschaftskalender | Signaltabelle
 Seite 2: Performance-Details | KI-Analyse | Verbesserungsvorschläge | Disclaimer
+Seite 3: Paper-Trading-Ergebnisse (Conservative / Normal / Risk im Vergleich)
 """
 
 import logging
@@ -27,6 +28,7 @@ def generate_report(
     trade_date: str,
     ai_summary: str,
     cfg: dict,
+    paper_summaries: dict = None,
 ) -> str:
     """
     Erstellt das Tages-PDF und gibt den Dateipfad zurück.
@@ -237,9 +239,197 @@ def generate_report(
         small,
     ))
 
+    # ------------------------------------------------------------------ #
+    # SEITE 3: Paper-Trading-Ergebnisse
+    # ------------------------------------------------------------------ #
+    if paper_summaries:
+        story.append(PageBreak())
+        _build_paper_trading_page(story, paper_summaries, trade_date, cfg,
+                                  h1, h2, body, small, colors, cm, Table,
+                                  TableStyle, HRFlowable, Spacer, Paragraph)
+
     doc.build(story)
     logger.info("PDF-Report erstellt: %s", pdf_path)
     return str(pdf_path)
+
+
+# ---------------------------------------------------------------------------
+# Paper-Trading-Seite
+# ---------------------------------------------------------------------------
+
+def _build_paper_trading_page(
+    story, paper_summaries, trade_date, cfg,
+    h1, h2, body, small, colors, cm, Table,
+    TableStyle, HRFlowable, Spacer, Paragraph,
+):
+    """Baut Seite 3 des PDFs: Paper-Trading-Vergleich aller drei Modi."""
+
+    _ACCENT = COLOR_ACCENT  # Modul-Konstante
+    MODE_LABELS = {
+        "conservative": "Vorsichtig",
+        "normal": "Normal",
+        "risk": "Risiko",
+    }
+    MODE_COLORS = {
+        "conservative": "#cce5ff",
+        "normal": "#fff3cd",
+        "risk": "#f8d7da",
+    }
+    COLOR_POSITIVE = "#28a745"
+    COLOR_NEGATIVE = "#dc3545"
+
+    story.append(Paragraph("Paper-Trading – Tagesergebnis", h1))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor(_ACCENT)))
+    story.append(Spacer(1, 0.3 * cm))
+
+    pt_cfg = cfg.get("paper_trading", {})
+    starting_capital = pt_cfg.get("starting_capital", 10_000.0)
+
+    # ---- Vergleichstabelle (alle Modi nebeneinander) ----
+    story.append(Paragraph("Portfolio-Vergleich", h2))
+    story.append(Spacer(1, 0.2 * cm))
+
+    header = ["Kennzahl", "Vorsichtig", "Normal", "Risiko"]
+    modes_order = ["conservative", "normal", "risk"]
+
+    def _val(mode, key, fmt=None):
+        d = paper_summaries.get(mode, {})
+        v = d.get(key)
+        if v is None:
+            return "–"
+        return fmt(v) if fmt else str(v)
+
+    sign = lambda v: f"+{v:.2f}" if v >= 0 else f"{v:.2f}"
+    signpct = lambda v: f"+{v:.2f}%" if v >= 0 else f"{v:.2f}%"
+
+    compare_data = [
+        header,
+        ["Startkapital", f"{starting_capital:,.2f}", f"{starting_capital:,.2f}", f"{starting_capital:,.2f}"],
+        ["Portfolio-Wert",
+         _val("conservative", "total_value", lambda v: f"{v:,.2f}"),
+         _val("normal", "total_value", lambda v: f"{v:,.2f}"),
+         _val("risk", "total_value", lambda v: f"{v:,.2f}")],
+        ["Gesamt-P&L",
+         _val("conservative", "total_pnl", sign),
+         _val("normal", "total_pnl", sign),
+         _val("risk", "total_pnl", sign)],
+        ["Gesamt-P&L %",
+         _val("conservative", "total_pnl_pct", signpct),
+         _val("normal", "total_pnl_pct", signpct),
+         _val("risk", "total_pnl_pct", signpct)],
+        ["Cash",
+         _val("conservative", "cash", lambda v: f"{v:,.2f}"),
+         _val("normal", "cash", lambda v: f"{v:,.2f}"),
+         _val("risk", "cash", lambda v: f"{v:,.2f}")],
+        ["Offene Positionen",
+         _val("conservative", "open_positions"),
+         _val("normal", "open_positions"),
+         _val("risk", "open_positions")],
+        ["Trades heute",
+         _val("conservative", "num_trades"),
+         _val("normal", "num_trades"),
+         _val("risk", "num_trades")],
+    ]
+
+    cmp_table = Table(compare_data, colWidths=[4.5 * cm, 4 * cm, 4 * cm, 4 * cm])
+    cmp_style = _base_table_style()
+    # Modus-Spalten einfärben
+    for col_idx, mode in enumerate(modes_order, start=1):
+        cmp_style.add("BACKGROUND", (col_idx, 1), (col_idx, -1),
+                      colors.HexColor(MODE_COLORS.get(mode, "#ffffff")))
+    cmp_table.setStyle(cmp_style)
+    story.append(cmp_table)
+    story.append(Spacer(1, 0.6 * cm))
+
+    # ---- Detail-Abschnitt je Modus ----
+    for mode in modes_order:
+        d = paper_summaries.get(mode)
+        if not d:
+            continue
+
+        label = MODE_LABELS.get(mode, mode.capitalize())
+        mode_color = MODE_COLORS.get(mode, "#ffffff")
+
+        story.append(Paragraph(f"Modus: {label}", h2))
+
+        # Konfigurationszeile
+        mode_cfg_data = cfg.get("paper_trading", {}).get("modes", {}).get(mode, {})
+        cfg_line = (
+            f"Max. Position: {mode_cfg_data.get('max_position_pct', '?') * 100:.0f}%  |  "
+            f"Max. Positionen: {mode_cfg_data.get('max_positions', '?')}  |  "
+            f"Stop-Loss: {mode_cfg_data.get('stop_loss_pct', 0) * 100:.0f}%  |  "
+            f"Take-Profit: {mode_cfg_data.get('take_profit_pct', 0) * 100:.0f}%  |  "
+            f"Min. Signalstärke: {mode_cfg_data.get('min_signal_strength', 0) * 100:.0f}%"
+        )
+        story.append(Paragraph(cfg_line, small))
+        story.append(Spacer(1, 0.2 * cm))
+
+        # Offene Positionen
+        positions = d.get("positions", [])
+        if positions:
+            pos_data = [["Ticker", "Anteile", "Einstieg", "Aktuell", "SL", "TP", "Unreal. P&L", "Marktwert"]]
+            for p in positions:
+                upnl = p.get("unrealized_pnl") or 0
+                upnl_pct = p.get("unrealized_pnl_pct") or 0
+                pos_data.append([
+                    p.get("ticker", "?"),
+                    f"{p.get('shares', 0):.1f}",
+                    f"{p.get('avg_entry_price', 0):.2f}",
+                    f"{p.get('current_price') or p.get('avg_entry_price', 0):.2f}",
+                    f"{p.get('stop_loss_price', 0):.2f}",
+                    f"{p.get('take_profit_price', 0):.2f}",
+                    f"{'+' if upnl >= 0 else ''}{upnl:.2f} ({upnl_pct:+.1f}%)",
+                    f"{p.get('market_value', 0):.2f}",
+                ])
+            pos_table = Table(pos_data, colWidths=[1.5*cm, 1.5*cm, 2*cm, 2*cm, 2*cm, 2*cm, 3.5*cm, 2.5*cm])
+            pos_style = _base_table_style()
+            pos_style.add("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(mode_color))
+            pos_style.add("TEXTCOLOR", (0, 0), (-1, 0), colors.black)
+            pos_table.setStyle(pos_style)
+            story.append(Paragraph("Offene Positionen:", body))
+            story.append(pos_table)
+            story.append(Spacer(1, 0.2 * cm))
+
+        # Trades des Tages
+        trades = d.get("trades", [])
+        if trades:
+            trade_data = [["Zeit", "Ticker", "Aktion", "Anteile", "Preis", "Wert", "P&L", "Grund"]]
+            for t in trades:
+                pnl = t.get("realized_pnl")
+                pnl_str = f"{pnl:+.2f}" if pnl is not None else "–"
+                trade_data.append([
+                    t.get("trade_time", "?"),
+                    t.get("ticker", "?"),
+                    t.get("action", "?"),
+                    f"{t.get('shares', 0):.1f}",
+                    f"{t.get('price', 0):.2f}",
+                    f"{t.get('value', 0):.2f}",
+                    pnl_str,
+                    (t.get("reason") or "–")[:18],
+                ])
+            trade_table = Table(
+                trade_data,
+                colWidths=[1.5*cm, 1.5*cm, 1.5*cm, 1.8*cm, 2*cm, 2.3*cm, 2.3*cm, 3*cm],
+            )
+            trade_style = _base_table_style()
+            # BUY/SELL einfärben
+            for i, t in enumerate(trades, start=1):
+                if t.get("action") == "BUY":
+                    trade_style.add("BACKGROUND", (2, i), (2, i), colors.HexColor(COLOR_WIN))
+                elif t.get("action") == "SELL":
+                    trade_style.add("BACKGROUND", (2, i), (2, i), colors.HexColor(COLOR_LOSS))
+                # P&L einfärben
+                pnl = t.get("realized_pnl")
+                if pnl is not None:
+                    col = COLOR_WIN if pnl >= 0 else COLOR_LOSS
+                    trade_style.add("BACKGROUND", (6, i), (6, i), colors.HexColor(col))
+            trade_table.setStyle(trade_style)
+            story.append(Paragraph("Trades heute:", body))
+            story.append(trade_table)
+        else:
+            story.append(Paragraph("Heute keine Trades ausgeführt.", body))
+
+        story.append(Spacer(1, 0.5 * cm))
 
 
 # ---------------------------------------------------------------------------
