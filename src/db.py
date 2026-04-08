@@ -142,8 +142,16 @@ def init_db(db_path: str) -> sqlite3.Connection:
 
 def upsert_prices(conn: sqlite3.Connection, ticker: str, df: pd.DataFrame) -> None:
     """Schreibt OHLCV-DataFrame in Tabelle prices (INSERT OR REPLACE)."""
+    def _vol(v):
+        """Konvertiert Volume sicher zu int – fängt NaN und Series-Objekte ab."""
+        if hasattr(v, "item"):   # numpy scalar → Python scalar
+            v = v.item()
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return 0
+        return int(v)
+
     rows = [
-        (ticker, str(ts), row["Open"], row["High"], row["Low"], row["Close"], int(row["Volume"]))
+        (ticker, str(ts), row["Open"], row["High"], row["Low"], row["Close"], _vol(row["Volume"]))
         for ts, row in df.iterrows()
     ]
     conn.executemany(
