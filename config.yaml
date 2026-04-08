@@ -57,3 +57,42 @@ market_hours:
   open: "15:30"    # US-Marktöffnung in MEZ
   close: "22:00"   # US-Marktschluss in MEZ
   intraday_interval_sec: 300   # 5 Minuten
+
+# ============================================================
+# Paper-Trading-Simulation (Test Trade Modus)
+# ============================================================
+# Alle drei Modi laufen parallel. Am Tagesende werden Ergebnis
+# im PDF-Report und in der DB festgehalten. Das Kapital und die
+# offenen Positionen werden zum nächsten Tag übertragen.
+# ============================================================
+
+paper_trading:
+  enabled: true
+  starting_capital: 10000.0   # Startkapital in USD (für alle Modi gleich)
+  commission_pct: 0.001       # 0,1 % Transaktionskosten pro Trade
+
+  modes:
+
+    # Vorsichtiger Modus: kleine Positionen, enger Stop-Loss, nur starke Signale
+    conservative:
+      max_position_pct: 0.05      # max 5 % des Portfolios pro Position
+      max_positions: 3            # max 3 gleichzeitige Positionen
+      stop_loss_pct: 0.02         # Stop-Loss 2 % unter Einstieg
+      take_profit_pct: 0.05       # Take-Profit 5 % über Einstieg
+      min_signal_strength: 0.8   # nur Signale mit Stärke ≥ 80 %
+
+    # Normaler Modus: ausgewogene Parameter
+    normal:
+      max_position_pct: 0.10
+      max_positions: 5
+      stop_loss_pct: 0.03
+      take_profit_pct: 0.08
+      min_signal_strength: 0.6
+
+    # Risiko-Modus: große Positionen, weiter Stop-Loss, auch schwächere Signale
+    risk:
+      max_position_pct: 0.25
+      max_positions: 8
+      stop_loss_pct: 0.05
+      take_profit_pct: 0.15
+      min_signal_strength: 0.4

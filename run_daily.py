@@ -8,11 +8,11 @@ Verwendung:
   python run_daily.py --intraday     # nur Intraday-Loop (bis Marktschluss)
   python run_daily.py --postmarket   # nur Postmarkt (Returns, KI, PDF)
   python run_daily.py --date 2026-04-07  # anderen Handelstag verwenden
+  python run_daily.py --no-paper-trading  # Paper-Trading deaktivieren
 """
 
 import argparse
 import logging
-import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -70,8 +70,11 @@ def phase_premarket(conn, cfg: dict, trade_date: str) -> None:
     logger.info("Vormarkt abgeschlossen. %d Events gespeichert.", len(events))
 
 
-def phase_intraday(conn, cfg: dict) -> None:
-    """Startet die Intraday-Schleife (blockiert bis Marktschluss)."""
+def phase_intraday(conn, cfg: dict, simulator=None) -> None:
+    """
+    Startet die Intraday-Schleife (blockiert bis Marktschluss).
+    Der optionale Simulator wird bei jedem Tick aufgerufen.
+    """
     from src.data_fetch import run_intraday_loop
 
     tickers = cfg.get("tickers", [])
@@ -80,13 +83,13 @@ def phase_intraday(conn, cfg: dict) -> None:
         return
 
     logger.info("=== PHASE: INTRADAY-LOOP (%d Tickers) ===", len(tickers))
-    run_intraday_loop(conn, tickers, cfg)
+    run_intraday_loop(conn, tickers, cfg, simulator=simulator)
     logger.info("Intraday-Loop beendet.")
 
 
-def phase_postmarket(conn, cfg: dict, trade_date: str) -> str:
+def phase_postmarket(conn, cfg: dict, trade_date: str, simulator=None) -> str:
     """
-    Berechnet EOD-Returns, holt KI-Analyse und erstellt PDF.
+    Berechnet EOD-Returns, schließt Paper-Trading-Tag, holt KI-Analyse, erstellt PDF.
     Gibt PDF-Pfad zurück.
     """
     from src.ai_verifier import verify_signals
@@ -94,12 +97,40 @@ def phase_postmarket(conn, cfg: dict, trade_date: str) -> str:
 
     logger.info("=== PHASE: POSTMARKT (%s) ===", trade_date)
 
+    # Paper-Trading-Tagesabschluss
+    paper_summaries = {}
+    if simulator and simulator.enabled:
+        logger.info("Paper-Trading: Tagesabschluss wird berechnet …")
+        paper_summaries = simulator.close_day()
+        _print_paper_trading_results(paper_summaries)
+
     ai_summary = verify_signals(conn, trade_date, cfg)
     logger.info("KI-Analyse abgeschlossen.")
 
-    pdf_path = generate_report(conn, trade_date, ai_summary, cfg)
+    pdf_path = generate_report(conn, trade_date, ai_summary, cfg, paper_summaries=paper_summaries)
     logger.info("PDF erstellt: %s", pdf_path)
     return pdf_path
+
+
+def _print_paper_trading_results(summaries: dict) -> None:
+    """Gibt eine kompakte Konsolen-Zusammenfassung der Paper-Trading-Ergebnisse aus."""
+    print("\n" + "=" * 65)
+    print("  PAPER-TRADING TAGESERGEBNIS")
+    print("=" * 65)
+    for mode, s in summaries.items():
+        pnl = s.get("total_pnl", 0)
+        pnl_pct = s.get("total_pnl_pct", 0)
+        total = s.get("total_value", 0)
+        trades = s.get("num_trades", 0)
+        positions = s.get("open_positions", 0)
+        sign = "+" if pnl >= 0 else ""
+        print(
+            f"  {mode.upper():14} | "
+            f"Portfolio: {total:>10,.2f} | "
+            f"P&L: {sign}{pnl:>8,.2f} ({sign}{pnl_pct:.2f}%) | "
+            f"Trades: {trades:>3} | Positionen: {positions}"
+        )
+    print("=" * 65 + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +148,7 @@ def main() -> None:
     parser.add_argument("--postmarket", action="store_true", help="Nur Postmarkt-Phase")
     parser.add_argument("--date", default=str(date.today()), help="Handelsdatum (YYYY-MM-DD)")
     parser.add_argument("--config", default="config.yaml", help="Pfad zur Konfigurationsdatei")
+    parser.add_argument("--no-paper-trading", action="store_true", help="Paper-Trading deaktivieren")
     args = parser.parse_args()
 
     # Konfiguration
@@ -135,6 +167,14 @@ def main() -> None:
     db_path = Path(cfg.get("data_dir", "./data")) / cfg.get("db_name", "trading.db")
     conn = init_db(str(db_path))
 
+    # Paper-Trading-Simulator initialisieren
+    simulator = None
+    if not args.no_paper_trading and cfg.get("paper_trading", {}).get("enabled", True):
+        from src.trade_simulator import PaperTradingSimulator
+        simulator = PaperTradingSimulator(cfg=cfg, conn=conn, trade_date=trade_date)
+        logger.info("Paper-Trading-Simulator initialisiert (Startkapital: %.2f)",
+                    cfg.get("paper_trading", {}).get("starting_capital", 10_000))
+
     # Bestimme welche Phasen laufen sollen
     run_all = not (args.premarket or args.intraday or args.postmarket)
 
@@ -143,16 +183,20 @@ def main() -> None:
             phase_premarket(conn, cfg, trade_date)
 
         if args.intraday or run_all:
-            phase_intraday(conn, cfg)
+            phase_intraday(conn, cfg, simulator=simulator)
 
         if args.postmarket or run_all:
-            pdf_path = phase_postmarket(conn, cfg, trade_date)
+            pdf_path = phase_postmarket(conn, cfg, trade_date, simulator=simulator)
             print(f"\nReport gespeichert: {pdf_path}")
 
         logger.info("Trading-System erfolgreich beendet.")
 
     except KeyboardInterrupt:
         logger.info("Abbruch durch Benutzer (Strg+C).")
+        # Auch bei Abbruch Paper-Trading-Stand sichern
+        if simulator and simulator.enabled:
+            logger.info("Sichere Paper-Trading-Stand …")
+            simulator.close_day()
     except Exception as exc:
         logger.exception("Unbehandelter Fehler: %s", exc)
         sys.exit(1)
