@@ -283,7 +283,10 @@ def run_intraday_loop(
                 df_ind = compute_indicators(df, cfg)
                 upsert_indicators(conn, ticker, df_ind)
 
-                signals = check_all_signals(df_ind, ticker, cfg)
+                # Signale nur auf den letzten 2 Balken prüfen (aktueller + vorheriger).
+                # Die gesamte Historie wurde bei früheren Ticks bereits verarbeitet.
+                df_recent = df_ind.tail(2)
+                signals = check_all_signals(df_recent, ticker, cfg)
                 for sig in signals:
                     insert_signal(conn, sig)
 

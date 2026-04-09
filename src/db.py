@@ -191,7 +191,14 @@ def upsert_indicators(conn: sqlite3.Connection, ticker: str, df: pd.DataFrame) -
 
 
 def insert_signal(conn: sqlite3.Connection, signal: dict) -> None:
-    """Fügt ein Signal in die Tabelle signals ein."""
+    """Fügt ein Signal ein – ignoriert Duplikate (gleicher Ticker/Timestamp/Typ)."""
+    exists = conn.execute(
+        "SELECT 1 FROM signals WHERE ticker = ? AND timestamp = ? AND signal_type = ?",
+        (signal["ticker"], signal["timestamp"], signal["signal_type"]),
+    ).fetchone()
+    if exists:
+        return  # Duplikat – bereits in dieser Session verarbeitet
+
     conn.execute(
         "INSERT INTO signals (ticker, timestamp, signal_type, strategy, strength, "
         "price_at_signal, rsi_at_signal) VALUES (?, ?, ?, ?, ?, ?, ?)",

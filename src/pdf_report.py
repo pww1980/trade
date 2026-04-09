@@ -12,6 +12,12 @@ from datetime import datetime
 from pathlib import Path
 import sqlite3
 
+# ReportLab-Konstante vorab laden (wird in Hilfsfunktionen benötigt)
+try:
+    from reportlab.lib.units import cm as _CM
+except ImportError:
+    _CM = 28.35  # Fallback: 1 cm in Punkten
+
 logger = logging.getLogger(__name__)
 
 # Farben
@@ -451,7 +457,7 @@ def _base_table_style() -> "TableStyle":
         ("FONTSIZE", (0, 0), (-1, -1), 8),
         ("GRID", (0, 0), (-1, -1), 0.3, colors.lightgrey),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ROWHEIGHT", (0, 0), (-1, -1), 0.6 * cm),
+        ("ROWHEIGHT", (0, 0), (-1, -1), 0.6 * _CM),
         ("LEFTPADDING", (0, 0), (-1, -1), 4),
         ("RIGHTPADDING", (0, 0), (-1, -1), 4),
     ])
